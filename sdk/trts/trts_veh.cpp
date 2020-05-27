@@ -32,8 +32,8 @@
 
 /**
  * File: trts_veh.cpp
- * Description: 
- *     This file implements the support of custom exception handling. 
+ * Description:
+ *     This file implements the support of custom exception handling.
  */
 
 #include "sgx_trts_exception.h"
@@ -53,12 +53,20 @@
 #include "trts_shared_constants.h"
 #include "se_cdefs.h"
 #include "sgx_memset_s.h"
+<<<<<<< HEAD
 #include "sgx_interrupt.h"
 #include "emm_private.h"
 #include "sgx_mm_rt_abstraction.h"
+<<<<<<< HEAD
 #include "sgx_trts_aex.h"
 
 #include "se_memcpy.h"
+=======
+=======
+
+
+>>>>>>> Support two new trusted exceptions on SGX 2: #PF and #GP
+>>>>>>> Support two new trusted exceptions on SGX 2: #PF and #GP
 typedef struct _handler_node_t
 {
     uintptr_t callback;
@@ -148,7 +156,7 @@ void *sgx_register_exception_handler(int is_first_handler, sgx_exception_handler
 // sgx_unregister_exception_handler()
 //      unregister a custom exception handler.
 // Parameter
-//      handler - a handler to the custom exception handler previously 
+//      handler - a handler to the custom exception handler previously
 // registered using the sgx_register_exception_handler function.
 // Return Value
 //      none zero - success
