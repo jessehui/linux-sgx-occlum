@@ -69,6 +69,7 @@ TRTS1_OBJS  := init_enclave.o \
                init_optimized_lib.o \
                trts_version.o \
                trts_add_trim.o \
+               trts_interrupt.o  \
 
 TRTS2_OBJS  := trts_nsp.o
 TRTS3_OBJS := ema_rt.o
