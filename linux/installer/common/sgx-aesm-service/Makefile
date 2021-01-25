@@ -47,9 +47,6 @@ AESMD_CONF_NAME=aesmd.service
 AESMD_CONF_DEL=aesmd.conf
 AESMD_CONF_PATH=/lib/systemd/system
 $(warning "You may need to start aesmd manually after it's installed!")
-else
-$(error "Unsupported platform - neither systemctl nor initctl is found!")
-endif
 endif
 
 QE_VER=1.0.0
