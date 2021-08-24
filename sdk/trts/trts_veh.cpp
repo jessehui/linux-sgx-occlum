@@ -54,6 +54,8 @@
 #include "sgx_interrupt.h"
 
 
+#include "emm_private.h"
+#include "sgx_mm_rt_abstraction.h"
 typedef struct _handler_node_t
 {
     uintptr_t callback;
@@ -64,6 +66,7 @@ static handler_node_t *g_first_node = NULL;
 static sgx_spinlock_t g_handler_lock = SGX_SPINLOCK_INITIALIZER;
 
 static uintptr_t g_veh_cookie = 0;
+sgx_mm_pfhandler_t g_mm_pfhandler = NULL;
 #define ENC_VEH_POINTER(x)  (uintptr_t)(x) ^ g_veh_cookie
 #define DEC_VEH_POINTER(x)  (sgx_exception_handler_t)((x) ^ g_veh_cookie)
 
@@ -209,6 +212,19 @@ extern "C" __attribute__((regparm(1))) void internal_handle_exception(sgx_except
         goto failed_end;
     thread_data->exception_flag++;
 
+    if(info->exception_vector == SGX_EXCEPTION_VECTOR_PF &&
+        (g_mm_pfhandler != NULL))
+    {
+        thread_data->exception_flag--;
+        sgx_pfinfo* pfinfo = (sgx_pfinfo*)(&info->exinfo);
+        if(SGX_MM_EXCEPTION_CONTINUE_EXECUTION == g_mm_pfhandler(pfinfo))
+        {
+            //instruction triggering the exception will be executed again.
+            continue_execution(info);
+        }
+        //restore old flag, and fall thru
+        thread_data->exception_flag++;
+    }
     // read lock
     sgx_spin_lock(&g_handler_lock);
 
@@ -299,7 +315,7 @@ static int expand_stack_by_pages(void *start_addr, size_t page_count)
     if ((start_addr == NULL) || (page_count == 0))
         return -1;
 
-    ret = apply_pages_within_exception(start_addr, page_count);
+    ret = mm_commit(start_addr, page_count << SE_PAGE_SHIFT);
     return ret;
 }
 
@@ -451,29 +467,29 @@ extern "C" sgx_status_t trts_handle_exception(void *tcs, outside_exitinfo_t *u_o
         return SGX_SUCCESS;
     }
 
-    // If no hardware exception, we try to use outside_info to do exception simulation
-    if (ssa_gpr->exit_info.valid != 1 && u_outside_info != NULL) {
-        if (!sgx_is_outside_enclave((void*)u_outside_info, sizeof(*u_outside_info)))
-        {   // looks like an attack
-            goto default_handler;
-        }
+    // // If no hardware exception, we try to use outside_info to do exception simulation
+    // if (ssa_gpr->exit_info.valid != 1 && u_outside_info != NULL) {
+    //     if (!sgx_is_outside_enclave((void*)u_outside_info, sizeof(*u_outside_info)))
+    //     {   // looks like an attack
+    //         goto default_handler;
+    //     }
 
-        // Copy into enclave to prevent TOCTTOU attack
-        outside_exitinfo_t outside_info = *u_outside_info;
+    //     // Copy into enclave to prevent TOCTTOU attack
+    //     outside_exitinfo_t outside_info = *u_outside_info;
 
-        if (outside_info.vector == SGX_EXCEPTION_VECTOR_PF) {
-            ssa_gpr->exit_info.vector = SGX_EXCEPTION_VECTOR_PF;
-            // Distinguish hardware exceptions from simulated exceptions
-            ssa_gpr->exit_info.exit_type = SGX_EXCEPTION_SIMULATED;
+    //     if (outside_info.vector == SGX_EXCEPTION_VECTOR_PF) {
+    //         ssa_gpr->exit_info.vector = SGX_EXCEPTION_VECTOR_PF;
+    //         // Distinguish hardware exceptions from simulated exceptions
+    //         ssa_gpr->exit_info.exit_type = SGX_EXCEPTION_SIMULATED;
 
-            sgx_exinfo_t *exinfo = reinterpret_cast<sgx_exinfo_t *>(reinterpret_cast<uintptr_t>(ssa_gpr) - 16);
-            memset_s(exinfo, sizeof(*exinfo), 0, sizeof(*exinfo));
-            exinfo->maddr = outside_info.addr;
-            exinfo->errcd = outside_info.err_flag & PF_ERR_FLAG_MASK;
+    //         sgx_exinfo_t *exinfo = reinterpret_cast<sgx_exinfo_t *>(reinterpret_cast<uintptr_t>(ssa_gpr) - 16);
+    //         memset_s(exinfo, sizeof(*exinfo), 0, sizeof(*exinfo));
+    //         exinfo->maddr = outside_info.addr;
+    //         exinfo->errcd = outside_info.err_flag & PF_ERR_FLAG_MASK;
 
-            ssa_gpr->exit_info.valid = 1;
-        }
-    }
+    //         ssa_gpr->exit_info.valid = 1;
+    //     }
+    // }
 
     if(ssa_gpr->exit_info.valid != 1)
     {   // exception handlers are not allowed to call in a non-exception state
@@ -505,17 +521,27 @@ extern "C" sgx_status_t trts_handle_exception(void *tcs, outside_exitinfo_t *u_o
     info->cpu_context.r15 = ssa_gpr->r15;
 #endif
 
-    if (info->exception_vector == SGX_EXCEPTION_VECTOR_GP ||
-        info->exception_vector == SGX_EXCEPTION_VECTOR_PF)
+    // if (info->exception_vector == SGX_EXCEPTION_VECTOR_GP ||
+    //     info->exception_vector == SGX_EXCEPTION_VECTOR_PF)
+    // {
+    //     sgx_exinfo_t *exinfo = reinterpret_cast<sgx_exinfo_t *>(reinterpret_cast<uintptr_t>(ssa_gpr) - 16);
+    //     info->exinfo = *exinfo;
+    // }
+    // else
+    // {
+    //     memset_s(&info->exinfo, sizeof(info->exinfo), 0, sizeof(info->exinfo));
+    // }
+
+    if (info->exception_vector == SGX_EXCEPTION_VECTOR_GP || info->exception_vector == SGX_EXCEPTION_VECTOR_PF)
+            // FUTURE: info->exception_vector == SGX_EXCEPTION_VECTOR_GP)
     {
-        sgx_exinfo_t *exinfo = reinterpret_cast<sgx_exinfo_t *>(reinterpret_cast<uintptr_t>(ssa_gpr) - 16);
-        info->exinfo = *exinfo;
-    }
-    else
-    {
+        misc_exinfo_t* exinfo =
+            (misc_exinfo_t*)((uint64_t)ssa_gpr - (uint64_t)MISC_BYTE_SIZE);
+        info->exinfo.faulting_address = exinfo->maddr;
+        info->exinfo.error_code = exinfo->errcd;
+    } else {
         memset_s(&info->exinfo, sizeof(info->exinfo), 0, sizeof(info->exinfo));
     }
-
     new_sp = (uintptr_t *)sp;
     ssa_gpr->REG(ip) = (size_t)internal_handle_exception; // prepare the ip for 2nd phrase handling
     ssa_gpr->REG(sp) = (size_t)new_sp;      // new stack for internal_handle_exception

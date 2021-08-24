@@ -114,20 +114,17 @@ typedef struct _cpu_context_t
 
 typedef struct _exinfo_t
 {
-    // If #PF: contains the page fault linear address that causes a page fault
-    // If #GP: the field is cleared
-    uint64_t maddr;
-    // Exception error code for either #GP or #PF
-    uint32_t errcd;
-    uint32_t _reserved;
-} sgx_exinfo_t;
+    uint64_t               faulting_address;
+    uint32_t               error_code;
+    uint32_t               reserved;
+}sgx_misc_exinfo_t;
 
 typedef struct _exception_info_t
 {
     sgx_cpu_context_t      cpu_context;
     sgx_exception_vector_t exception_vector;
     sgx_exception_type_t   exception_type;
-    sgx_exinfo_t           exinfo;
+    sgx_misc_exinfo_t      exinfo;
 } sgx_exception_info_t;
 
 typedef int (*sgx_exception_handler_t)(sgx_exception_info_t *info);
