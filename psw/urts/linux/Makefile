@@ -51,7 +51,7 @@ INC += -I$(COMMON_DIR)/inc                \
        -I$(LINUX_PSW_DIR)/urts/           \
        -I$(LINUX_PSW_DIR)/urts/linux      \
        -I$(LINUX_PSW_DIR)/urts/parser     \
-       -I$(LINUX_SDK_DIR)/emm/include     \
+       -I$(LINUX_EXTERNAL_DIR)/sgx-emm/emm_src/include     \
        -I$(VTUNE_DIR)/include \
        -I$(VTUNE_DIR)/sdk/src/ittnotify 
 
