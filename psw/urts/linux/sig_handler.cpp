@@ -136,36 +136,36 @@ void sig_handler(int signum, siginfo_t* siginfo, void *priv)
         void* ms = NULL;
 
         // #PF and #GP exception simulation on SGX 1
-        outside_exitinfo_t outside_info;
-        if (signum == SIGSEGV) {
-            bool can_handle;
-            int err_flag = PF_ERR_FLAG_USER;
+        // outside_exitinfo_t outside_info;
+        // if (signum == SIGSEGV) {
+        //     bool can_handle;
+        //     int err_flag = PF_ERR_FLAG_USER;
 
-            switch(siginfo->si_code) {
-            case SEGV_MAPERR:
-                can_handle = true;
-                break;
-            case SEGV_ACCERR:
-                err_flag |= PF_ERR_FLAG_PRESENT;
-                // We cannot know the exact flag for this page faulut given
-                // the siginfo_t. We just assume that if SEGV_ACCER, then it
-                // stems from a invalid memory write.
-                err_flag |= PF_ERR_FLAG_WRITE;
-                can_handle = true;
-                break;
-            default:
-                // TODO: handle more types of SIGSEGV
-                can_handle = false;
-                break;
-            }
+        //     switch(siginfo->si_code) {
+        //     case SEGV_MAPERR:
+        //         can_handle = true;
+        //         break;
+        //     case SEGV_ACCERR:
+        //         err_flag |= PF_ERR_FLAG_PRESENT;
+        //         // We cannot know the exact flag for this page faulut given
+        //         // the siginfo_t. We just assume that if SEGV_ACCER, then it
+        //         // stems from a invalid memory write.
+        //         err_flag |= PF_ERR_FLAG_WRITE;
+        //         can_handle = true;
+        //         break;
+        //     default:
+        //         // TODO: handle more types of SIGSEGV
+        //         can_handle = false;
+        //         break;
+        //     }
 
-            if (can_handle) {
-                outside_info.vector = SGX_EXCEPTION_VECTOR_PF;
-                outside_info.addr = (uint64_t) siginfo->si_addr;
-                outside_info.err_flag = err_flag;
-                ms = (void*) &outside_info;
-            }
-        }
+        //     if (can_handle) {
+        //         outside_info.vector = SGX_EXCEPTION_VECTOR_PF;
+        //         outside_info.addr = (uint64_t) siginfo->si_addr;
+        //         outside_info.err_flag = err_flag;
+        //         ms = (void*) &outside_info;
+        //     }
+        // }
 
         int ecmd;
         if (signum != SIGRT_INTERRUPT) {
@@ -437,11 +437,11 @@ static void __attribute__((constructor)) vdso_detector(void)
     vdso_sgx_enter_enclave = NULL;
 #else  
     // TODO: We disable vdso support in Occlum's SGX SDK temporarily
-    vdso_sgx_enter_enclave = NULL;
-    // if(vdso_sgx_enter_enclave == NULL)
-    // {
-    //     vdso_sgx_enter_enclave = (vdso_sgx_enter_enclave_t)get_vdso_sym("__vdso_sgx_enter_enclave");
-    // }
+    // vdso_sgx_enter_enclave = NULL;
+    if(vdso_sgx_enter_enclave == NULL)
+    {
+        vdso_sgx_enter_enclave = (vdso_sgx_enter_enclave_t)get_vdso_sym("__vdso_sgx_enter_enclave");
+    }
 #endif
 }
 

@@ -202,6 +202,7 @@ void driver(int sid)
             continue;
         }else
         {
+            printf("ret = %d\n", ret);
             abort();
         }
         //test_tcs does its own retry
