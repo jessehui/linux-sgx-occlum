@@ -332,6 +332,7 @@ extern "C" const char Leverifyreport2_inst;
 //              0 - fail
 extern "C" sgx_status_t trts_handle_exception(void *tcs, outside_exitinfo_t *u_outside_info)
 {
+    UNUSED(u_outside_info);
     thread_data_t *thread_data = get_thread_data();
     ssa_gpr_t *ssa_gpr = NULL;
     sgx_exception_info_t *info = NULL;
