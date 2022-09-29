@@ -81,6 +81,8 @@ extern "C" int init_rts_emas(size_t rts_base, size_t rts_end, layout_t *start, l
 extern "C" int sgx_mm_init(size_t, size_t);
 extern uintptr_t enclave_code_start_address;
 extern size_t enclave_code_size;
+extern uintptr_t user_region_start_addr;
+extern size_t user_region_end_addr;
 // init_enclave()
 //      Initialize enclave.
 // Parameters:
@@ -289,6 +291,9 @@ sgx_status_t do_init_enclave(void *ms, void *tcs)
             user_end = user_base + (((size_t)layout->entry.page_count) << SE_PAGE_SHIFT);
             if(user_base > user_end)
                 return SGX_ERROR_UNEXPECTED;
+            
+            user_region_start_addr = user_base;
+            user_region_end_addr = user_end;
 
             rts_end = user_base;
         }

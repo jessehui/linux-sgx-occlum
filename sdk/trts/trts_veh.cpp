@@ -52,6 +52,8 @@
 #include "se_cdefs.h"
 #include "emm_private.h"
 #include "sgx_mm_rt_abstraction.h"
+#include "sgx_memset_s.h"
+#include "se_trace.h"
 typedef struct _handler_node_t
 {
     uintptr_t callback;
@@ -181,7 +183,7 @@ int sgx_unregister_exception_handler(void *handler)
     return status;
 }
 
-static bool is_standard_exception(uintptr_t);
+static bool is_standard_exception(uintptr_t, bool);
 
 // continue_execution(sgx_exception_info_t *info):
 //      try to restore the thread context saved in info to current execution context.
@@ -276,7 +278,7 @@ extern "C" __attribute__((regparm(1))) void internal_handle_exception(sgx_except
         size -= sizeof(sgx_exception_handler_t);
     }
 
-    standard_exception = is_standard_exception(info->cpu_context.REG(ip));
+    standard_exception = is_standard_exception(info->cpu_context.REG(ip), info->exception_vector == SGX_EXCEPTION_VECTOR_PF);
 
     // call default handler
     // ignore invalid return value, treat to EXCEPTION_CONTINUE_SEARCH
@@ -357,13 +359,16 @@ extern "C" sgx_status_t trts_handle_exception(void *tcs)
     // For standard exceptions, we can just use the stacks managed by SGX SDK;
     // but, for non-standard exceptions, we cannot make any assumption about how the dynamically-loaded code uses stack--- it may choose an arbitrary memory region as its stack.
     // Thus, when handling non-standard exceptions, we use a special, SDK-reserved memory region as the stack.
-    standard_exception = is_standard_exception(ssa_gpr->REG(ip));
+    standard_exception = is_standard_exception(ssa_gpr->REG(ip), ssa_gpr->exit_info.vector == SE_VECTOR_PF);
+    // SE_TRACE(SE_TRACE_DEBUG,
+    //     "trts_handle_exception standard excpetion? %s\n",
+    //         standard_exception?"Y":"N");
 
     if (!standard_exception)
     {
-        // The bottom 2 pages are used as stack to handle the non-standard exceptions.
+        // The bottom 8 pages are used as stack to handle the non-standard exceptions.
         // User should take responsibility to confirm the stack is not corrupted.
-        sp = thread_data->stack_limit_addr + SE_PAGE_SIZE*2;
+        sp = thread_data->stack_limit_addr + SE_PAGE_SIZE*8;
     }
     else
     {
@@ -493,6 +498,8 @@ extern "C" sgx_status_t trts_handle_exception(void *tcs)
             (misc_exinfo_t*)((uint64_t)ssa_gpr - (uint64_t)MISC_BYTE_SIZE);
         info->exinfo.faulting_address = exinfo->maddr;
         info->exinfo.error_code = exinfo->errcd;
+    } else {
+        memset_s(&info->exinfo, sizeof(info->exinfo), 0, sizeof(info->exinfo));
     }
     new_sp = (uintptr_t *)sp;
     ssa_gpr->REG(ip) = (size_t)internal_handle_exception; // prepare the ip for 2nd phrase handling
@@ -514,11 +521,40 @@ default_handler:
 uintptr_t enclave_code_start_address = 0;
 size_t enclave_code_size = 0;
 
+uintptr_t user_region_start_addr = 0;
+size_t user_region_end_addr = 0;
+
 // Exceptions, according to their sources, can be categorized into two types: standard exceptions and non-standard exceptions.
 // Standard exceptions are those triggered by the code of SGX SDK itself or the app code that statically linked to SGX SDK.
 // Non-standard exceptions are those triggered by dynamically-loaded code.
-static bool is_standard_exception(uintptr_t xip)
+// Page fault are treated as standard exception.
+// static bool is_standard_exception(uintptr_t xip, bool is_page_fault)
+// {
+//     UNUSED(is_page_fault);
+//     assert(enclave_code_start_address != 0);
+//     assert(enclave_code_size != 0);
+//     assert(user_region_end_addr != 0);
+//     assert(user_region_start_addr != 0);
+
+//     // if (is_page_fault) {
+//     //     return true;
+//     // }
+
+//     // if (xip >= enclave_code_start_address &&
+//     //     xip < (enclave_code_start_address + enclave_code_size))
+//     // {
+//     //     return true;
+//     // }
+//     if (xip >= user_region_start_addr && xip < user_region_end_addr) {
+//         return false;
+//     }
+
+//     return true;
+// }
+
+static bool is_standard_exception(uintptr_t xip, bool is_page_fault)
 {
+    UNUSED(is_page_fault);
     assert(enclave_code_start_address != 0);
     assert(enclave_code_size != 0);
 

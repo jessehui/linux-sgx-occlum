@@ -19,7 +19,7 @@ source /opt/intel/sgxsdk/environment
 cd ${SCRIPT_PATH}
 make -C psw/urts/linux
 cd build/linux
-ln -s libsgx_enclave_common.so libsgx_enclave_common.so.1
+ln -sf libsgx_enclave_common.so libsgx_enclave_common.so.1
 export LD_LIBRARY_PATH=${SCRIPT_PATH}/build/linux/
 
 cd ${SCRIPT_PATH}/external/sgx-emm/api_tests/
