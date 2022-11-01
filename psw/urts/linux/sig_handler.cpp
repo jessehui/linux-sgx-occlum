@@ -98,15 +98,15 @@ extern "C" int vdso_sgx_enter_enclave_wrapper(unsigned long rdi, unsigned long r
                     unsigned long rdx, unsigned int function,
                     unsigned long r8,  unsigned long r9,
                     struct sgx_enclave_run *run);
-
+static void vdso_get_sgx_enter_enclave_range(size_t *start, size_t *end);
 
 
 void reg_sig_handler();
 int do_ecall(const int fn, const void *ocall_table, const void *ms, CTrustThread *trust_thread);
 
-
 void sig_handler(int signum, siginfo_t* siginfo, void *priv)
 {
+    UNUSED(siginfo);
     SE_TRACE(SE_TRACE_DEBUG, "signal handler is triggered\n");
     ucontext_t* context = reinterpret_cast<ucontext_t *>(priv);
     unsigned int *xip = reinterpret_cast<unsigned int *>(context->uc_mcontext.gregs[REG_XIP]);
@@ -115,56 +115,37 @@ void sig_handler(int signum, siginfo_t* siginfo, void *priv)
     /* `xbx' is only used in assertions. */
     size_t xbx = context->uc_mcontext.gregs[REG_XBX];
 #endif
-    ecall_param_t *param = ECALL_PARAM;
+    size_t rbp = context->uc_mcontext.gregs[REG_RBP];
+    // size_t rbp_addr = reinterpret_cast<size_t>((size_t *)rbp);
+    // size_t rsp = context->uc_mcontext.gregs[REG_RSP];
+    // ecall_param_t *param = ECALL_PARAM;
+    // Incorrect
+    // struct sgx_enclave_run** run_test = reinterpret_cast<struct sgx_enclave_run**>(rsp + 3 * 8);
+    // size_t run_context = GLOBAL_RUN_CONTEXTS.inner[xbx];
 
-    //the case of exception on ERESUME or within enclave.
-    //We can't distinguish ERESUME exception from exception within enclave. We assume it is the exception within enclave.
-    //If it is ERESUME exception, it will raise another exception in ecall and ecall will return error.
-    if(xip == get_aep()
-            && SE_ERESUME == xax)
-    {
+
+    // struct sgx_enclave_run* run_test = reinterpret_cast<struct sgx_enclave_run*>(rbp);
+    // struct sgx_enclave_run* run_test = reinterpret_cast<struct sgx_enclave_run*>(xbx);
+    // SE_TRACE(SE_TRACE_DEBUG, "in sig_handler, from stack, rbp = 0x%lx, rsp = 0x%lx, run_addr = 0x%lx\n", rbp, rsp, run_test);
+    // SE_TRACE(SE_TRACE_DEBUG, "in sig_handler, run_context = 0x%lx\n", run_context);
+
+    size_t sgx_enter_enclave_symbol_start = 0;
+    size_t sgx_enter_enclave_symbol_end = 0;
+    vdso_get_sgx_enter_enclave_range(&sgx_enter_enclave_symbol_start, &sgx_enter_enclave_symbol_end);
+    // size_t aep_addr = (size_t)get_aep_vdso();
+    // SE_TRACE(SE_TRACE_DEBUG, "aep addr = 0x%lx\n", aep_addr);
+    if(sgx_enter_enclave_symbol_start <= (size_t)xip && (size_t)xip <= sgx_enter_enclave_symbol_end  && SE_ERESUME == xax) {
+    // if (aep_addr == (size_t)xip && SE_ERESUME == xax) {
 #ifndef SE_SIM
         assert(ENCLU == (*xip & 0xffffff));
 #endif
         //suppose the exception is within enclave.
-        SE_TRACE(SE_TRACE_NOTICE, "exception on ERESUME\n");
+        SE_TRACE(SE_TRACE_DEBUG, "SIGINTR caught\n");
         //The ecall looks recursively, but it will not cause infinite call.
         //If exception is raised in trts again and again, the SSA will overflow, and finally it is EENTER exception.
-        assert(reinterpret_cast<tcs_t *>(xbx) == param->tcs);
+        // assert(reinterpret_cast<tcs_t *>(rcx) == param->tcs);
 
         void* ms = NULL;
-
-        // // #PF and #GP exception simulation on SGX 1
-        // outside_exitinfo_t outside_info;
-        // if (signum == SIGSEGV) {
-        //     bool can_handle;
-        //     int err_flag = PF_ERR_FLAG_USER;
-
-        //     switch(siginfo->si_code) {
-        //     case SEGV_MAPERR:
-        //         can_handle = true;
-        //         break;
-        //     case SEGV_ACCERR:
-        //         err_flag |= PF_ERR_FLAG_PRESENT;
-        //         // We cannot know the exact flag for this page faulut given
-        //         // the siginfo_t. We just assume that if SEGV_ACCER, then it
-        //         // stems from a invalid memory write.
-        //         err_flag |= PF_ERR_FLAG_WRITE;
-        //         can_handle = true;
-        //         break;
-        //     default:
-        //         // TODO: handle more types of SIGSEGV
-        //         can_handle = false;
-        //         break;
-        //     }
-
-        //     if (can_handle) {
-        //         outside_info.vector = SGX_EXCEPTION_VECTOR_PF;
-        //         outside_info.addr = (uint64_t) siginfo->si_addr;
-        //         outside_info.err_flag = err_flag;
-        //         ms = (void*) &outside_info;
-        //     }
-        // }
 
         int ecmd;
         if (signum != SIGRT_INTERRUPT) {
@@ -172,80 +153,202 @@ void sig_handler(int signum, siginfo_t* siginfo, void *priv)
         } else {
             ecmd = ECMD_INTERRUPT;
         }
+        assert(ecmd == ECMD_INTERRUPT);
 
-        CEnclave *enclave = param->trust_thread->get_enclave();
-        unsigned int ret = enclave->ecall(ecmd, param->ocall_table, ms);
+        // size_t run_context = GLOBAL_RUN_CONTEXTS.inner[xbx];
+        size_t* run_context_addr = reinterpret_cast<size_t *>(rbp +  16);
+        struct sgx_enclave_run* run = reinterpret_cast<struct sgx_enclave_run*> (*run_context_addr);
+        SE_TRACE(SE_TRACE_DEBUG, "in sig_handler, tcs_addr = 0x%lx, run_addr = 0x%lx\n",xbx, run);
+        tcs_t *tcs = reinterpret_cast<tcs_t *>(xbx);
+        // struct sgx_enclave_run* run = reinterpret_cast<struct sgx_enclave_run*>(run_context);
+        assert(reinterpret_cast<tcs_t *>(run->tcs) == tcs);
+
+        // assert(run->tcs == run_test->tcs);
+
+        // assert(reinterpret_cast<tcs_t *>(run_test->tcs) == tcs);
+
+        __u64 *user_data = (__u64*)run->user_data;
+        CTrustThread* trust_thread = reinterpret_cast<CTrustThread *>(user_data[1]);
+        if (trust_thread == NULL)
+        {
+            run->user_data = SGX_ERROR_UNEXPECTED;
+            return;
+        }
+        // assert((size_t)run->tcs == xbx);
+        
+        void *ocall_table = reinterpret_cast<void *>(user_data[0]);
+        // CEnclave *enclave = trust_thread->get_enclave();
+        // unsigned int ret = enclave->ecall(ECMD_INTERRUPT, ocall_table, ms);
+        unsigned int ret = do_ecall(ECMD_INTERRUPT, ocall_table, ms, trust_thread);
         if(SGX_SUCCESS == ret)
         {
-            //ERESUME execute
-            return;
+            SE_TRACE(SE_TRACE_DEBUG, "sig_handler handle successful\n");
         }
-        //If the exception is caused by enclave lost or internal stack overrun, then return the error code to ecall caller elegantly.
-        else if(SGX_ERROR_ENCLAVE_LOST == ret || SGX_ERROR_STACK_OVERRUN == ret)
-        {
-            //enter_enlcave function will return with ret which is from tRTS;
-            context->uc_mcontext.gregs[REG_XIP] = reinterpret_cast<greg_t>(get_eretp());
-            context->uc_mcontext.gregs[REG_XSI] = ret;
-            return;
-        }
-        //If we can't fix the exception within enclave, then give the handle to other signal hanlder.
-        //Call the previous signal handler. The default signal handler should terminate the application.
+        return;
+        // return;
+        // __u64 *user_data = (__u64*)thread_local_run_context->user_data;
+        // void *ocall_table = reinterpret_cast<void *>(user_data[0]);
+        // CEnclave *enclave = reinterpret_cast<CEnclave *>(user_data[1]);
+        // unsigned int ret = enclave->ecall(ecmd, ocall_table, ms);
+        // if(SGX_SUCCESS == ret)
+        // {
+        //     //ERESUME execute
+        //     SE_TRACE(SE_TRACE_DEBUG, "SIGINTR handle successful\n");
+        //     return;
+        // }
+        // //If the exception is caused by enclave lost or internal stack overrun, then return the error code to ecall caller elegantly.
+        // else if(SGX_ERROR_ENCLAVE_LOST == ret || SGX_ERROR_STACK_OVERRUN == ret)
+        // {
+        //     //enter_enlcave function will return with ret which is from tRTS;
+        //     context->uc_mcontext.gregs[REG_XIP] = reinterpret_cast<greg_t>(get_eretp());
+        //     context->uc_mcontext.gregs[REG_XSI] = ret;
+        //     return;
+        // }
+        // //If we can't fix the exception within enclave, then give the handle to other signal hanlder.
+        // //Call the previous signal handler. The default signal handler should terminate the application.
         
-        enclave->rdunlock();
-        CEnclavePool::instance()->unref_enclave(enclave);
+        // enclave->rdunlock();
+        // CEnclavePool::instance()->unref_enclave(enclave);
     }
     else if (signum == SIGRT_INTERRUPT)
     {
         // If not interrupting the enclave, just ignore the signal
         return;
-    }
-    //the case of exception on EENTER instruction.
-    else if(xip == get_eenterp()
-            && SE_EENTER == xax)
-    {
-        assert(reinterpret_cast<tcs_t *>(xbx) == param->tcs);
-        assert(ENCLU == (*xip & 0xffffff));
-        SE_TRACE(SE_TRACE_NOTICE, "exception on EENTER\n");
-        //enter_enlcave function will return with SE_ERROR_ENCLAVE_LOST
-        context->uc_mcontext.gregs[REG_XIP] = reinterpret_cast<greg_t>(get_eretp());
-        context->uc_mcontext.gregs[REG_XSI] = SGX_ERROR_ENCLAVE_LOST;
-        return;
+    } else {
+        SE_TRACE(SE_TRACE_DEBUG, "UNKNOWN error\n");
+        abort();
     }
 
-    SE_TRACE(SE_TRACE_DEBUG, "NOT enclave signal\n");
-    //it is not SE exception. if the old signal handler is default signal handler, we reset signal handler.
-    //raise the signal again, and the default signal handler will be called.
-    if(SIG_DFL == g_old_sigact[signum].sa_handler)
-    {
-        signal(signum, SIG_DFL);
-        raise(signum);
-    }
-    //if there is old signal handler, we need transfer the signal to the old signal handler;
-    else
-    {
-        if(!(g_old_sigact[signum].sa_flags & SA_NODEFER))
-            sigaddset(&g_old_sigact[signum].sa_mask, signum);
+//     //the case of exception on ERESUME or within enclave.
+//     //We can't distinguish ERESUME exception from exception within enclave. We assume it is the exception within enclave.
+//     //If it is ERESUME exception, it will raise another exception in ecall and ecall will return error.
+//     else if(xip == get_aep()
+//             && SE_ERESUME == xax)
+//     {
+// #ifndef SE_SIM
+//         assert(ENCLU == (*xip & 0xffffff));
+// #endif
+//         //suppose the exception is within enclave.
+//         SE_TRACE(SE_TRACE_NOTICE, "exception on ERESUME\n");
+//         //The ecall looks recursively, but it will not cause infinite call.
+//         //If exception is raised in trts again and again, the SSA will overflow, and finally it is EENTER exception.
+//         // assert(reinterpret_cast<tcs_t *>(xbx) == param->tcs);
 
-        sigset_t cur_set;
-        pthread_sigmask(SIG_SETMASK, &g_old_sigact[signum].sa_mask, &cur_set);
+//         void* ms = NULL;
 
-        if(g_old_sigact[signum].sa_flags & SA_SIGINFO)
-        {
-            g_old_sigact[signum].sa_sigaction(signum, siginfo, priv);
-        }
-        else
-        {
-            g_old_sigact[signum].sa_handler(signum);
-        }
+//         // // #PF and #GP exception simulation on SGX 1
+//         // outside_exitinfo_t outside_info;
+//         // if (signum == SIGSEGV) {
+//         //     bool can_handle;
+//         //     int err_flag = PF_ERR_FLAG_USER;
 
-        pthread_sigmask(SIG_SETMASK, &cur_set, NULL);
+//         //     switch(siginfo->si_code) {
+//         //     case SEGV_MAPERR:
+//         //         can_handle = true;
+//         //         break;
+//         //     case SEGV_ACCERR:
+//         //         err_flag |= PF_ERR_FLAG_PRESENT;
+//         //         // We cannot know the exact flag for this page faulut given
+//         //         // the siginfo_t. We just assume that if SEGV_ACCER, then it
+//         //         // stems from a invalid memory write.
+//         //         err_flag |= PF_ERR_FLAG_WRITE;
+//         //         can_handle = true;
+//         //         break;
+//         //     default:
+//         //         // TODO: handle more types of SIGSEGV
+//         //         can_handle = false;
+//         //         break;
+//         //     }
 
-        //If the g_old_sigact set SA_RESETHAND, it will break the chain which means
-        //g_old_sigact->next_old_sigact will not be called. Our signal handler does not
-        //responsable for that. We just follow what os do on SA_RESETHAND.
-        if(g_old_sigact[signum].sa_flags & SA_RESETHAND)
-            g_old_sigact[signum].sa_handler = SIG_DFL;
-    }
+//         //     if (can_handle) {
+//         //         outside_info.vector = SGX_EXCEPTION_VECTOR_PF;
+//         //         outside_info.addr = (uint64_t) siginfo->si_addr;
+//         //         outside_info.err_flag = err_flag;
+//         //         ms = (void*) &outside_info;
+//         //     }
+//         // }
+
+//         int ecmd;
+//         if (signum != SIGRT_INTERRUPT) {
+//             ecmd = ECMD_EXCEPT;
+//         } else {
+//             ecmd = ECMD_INTERRUPT;
+//         }
+//         return;
+
+//         CEnclave *enclave = param->trust_thread->get_enclave();
+//         unsigned int ret = enclave->ecall(ecmd, param->ocall_table, ms);
+//         if(SGX_SUCCESS == ret)
+//         {
+//             //ERESUME execute
+//             return;
+//         }
+//         //If the exception is caused by enclave lost or internal stack overrun, then return the error code to ecall caller elegantly.
+//         else if(SGX_ERROR_ENCLAVE_LOST == ret || SGX_ERROR_STACK_OVERRUN == ret)
+//         {
+//             //enter_enlcave function will return with ret which is from tRTS;
+//             context->uc_mcontext.gregs[REG_XIP] = reinterpret_cast<greg_t>(get_eretp());
+//             context->uc_mcontext.gregs[REG_XSI] = ret;
+//             return;
+//         }
+//         //If we can't fix the exception within enclave, then give the handle to other signal hanlder.
+//         //Call the previous signal handler. The default signal handler should terminate the application.
+        
+//         enclave->rdunlock();
+//         CEnclavePool::instance()->unref_enclave(enclave);
+//     }
+//     // else if (signum == SIGRT_INTERRUPT)
+//     // {
+//     //     // If not interrupting the enclave, just ignore the signal
+//     //     return;
+//     // }
+//     //the case of exception on EENTER instruction.
+//     else if(xip == get_eenterp()
+//             && SE_EENTER == xax)
+//     {
+//         // assert(reinterpret_cast<tcs_t *>(xbx) == param->tcs);
+//         assert(ENCLU == (*xip & 0xffffff));
+//         SE_TRACE(SE_TRACE_NOTICE, "exception on EENTER\n");
+//         //enter_enlcave function will return with SE_ERROR_ENCLAVE_LOST
+//         context->uc_mcontext.gregs[REG_XIP] = reinterpret_cast<greg_t>(get_eretp());
+//         context->uc_mcontext.gregs[REG_XSI] = SGX_ERROR_ENCLAVE_LOST;
+//         return;
+//     }
+
+//     SE_TRACE(SE_TRACE_DEBUG, "NOT enclave signal\n");
+//     //it is not SE exception. if the old signal handler is default signal handler, we reset signal handler.
+//     //raise the signal again, and the default signal handler will be called.
+//     if(SIG_DFL == g_old_sigact[signum].sa_handler)
+//     {
+//         signal(signum, SIG_DFL);
+//         raise(signum);
+//     }
+//     //if there is old signal handler, we need transfer the signal to the old signal handler;
+//     else
+//     {
+//         if(!(g_old_sigact[signum].sa_flags & SA_NODEFER))
+//             sigaddset(&g_old_sigact[signum].sa_mask, signum);
+
+//         sigset_t cur_set;
+//         pthread_sigmask(SIG_SETMASK, &g_old_sigact[signum].sa_mask, &cur_set);
+
+//         if(g_old_sigact[signum].sa_flags & SA_SIGINFO)
+//         {
+//             g_old_sigact[signum].sa_sigaction(signum, siginfo, priv);
+//         }
+//         else
+//         {
+//             g_old_sigact[signum].sa_handler(signum);
+//         }
+
+//         pthread_sigmask(SIG_SETMASK, &cur_set, NULL);
+
+//         //If the g_old_sigact set SA_RESETHAND, it will break the chain which means
+//         //g_old_sigact->next_old_sigact will not be called. Our signal handler does not
+//         //responsable for that. We just follow what os do on SA_RESETHAND.
+//         if(g_old_sigact[signum].sa_flags & SA_RESETHAND)
+//             g_old_sigact[signum].sa_handler = SIG_DFL;
+//     }
 }
 
 void reg_sig_handler()
@@ -253,7 +356,7 @@ void reg_sig_handler()
     if(vdso_sgx_enter_enclave != NULL)
     {
         SE_TRACE(SE_TRACE_DEBUG, "vdso_sgx_enter_enclave exists, we won't use signal handler here\n");
-        return;
+        // return;
     }
     int ret = 0;
     struct sigaction sig_act;
@@ -281,16 +384,16 @@ void reg_sig_handler()
     // interrupts
     sigaddset(&sig_act.sa_mask, SIGRT_INTERRUPT);
 
-    ret = sigaction(SIGSEGV, &sig_act, &g_old_sigact[SIGSEGV]);
-    if (0 != ret) abort();
-    ret = sigaction(SIGFPE, &sig_act, &g_old_sigact[SIGFPE]);
-    if (0 != ret) abort();
-    ret = sigaction(SIGILL, &sig_act, &g_old_sigact[SIGILL]);
-    if (0 != ret) abort();
-    ret = sigaction(SIGBUS, &sig_act, &g_old_sigact[SIGBUS]);
-    if (0 != ret) abort();
-    ret = sigaction(SIGTRAP, &sig_act, &g_old_sigact[SIGTRAP]);
-    if (0 != ret) abort();
+    // ret = sigaction(SIGSEGV, &sig_act, &g_old_sigact[SIGSEGV]);
+    // if (0 != ret) abort();
+    // ret = sigaction(SIGFPE, &sig_act, &g_old_sigact[SIGFPE]);
+    // if (0 != ret) abort();
+    // ret = sigaction(SIGILL, &sig_act, &g_old_sigact[SIGILL]);
+    // if (0 != ret) abort();
+    // ret = sigaction(SIGBUS, &sig_act, &g_old_sigact[SIGBUS]);
+    // if (0 != ret) abort();
+    // ret = sigaction(SIGTRAP, &sig_act, &g_old_sigact[SIGTRAP]);
+    // if (0 != ret) abort();
 
     sig_act.sa_flags = SA_SIGINFO ; // Remove SA_RESTART and SA_NODEFER
     ret = sigaction(SIGRT_INTERRUPT, &sig_act, &g_old_sigact[SIGRT_INTERRUPT]);
@@ -304,7 +407,7 @@ extern "C" int enter_enclave(const tcs_t *tcs, const long fn, const void *ocall_
 
 extern "C" int stack_sticker(unsigned int proc, sgx_ocall_table_t *ocall_table, void *ms, CTrustThread *trust_thread, tcs_t *tcs);
 
-void* get_vdso_sym(const char* vdso_func_name) 
+void* get_vdso_sym(const char* vdso_func_name, size_t *size)
 {
     void *ret = NULL;
 
@@ -340,6 +443,9 @@ void* get_vdso_sym(const char* vdso_func_name)
                     auto vdname = dynstr + sym.st_name;
                     if (strcmp(vdname, vdso_func_name) == 0) {
                         ret = (vdso_address + sym.st_value);
+                        if (size != NULL) {
+                            *size = sym.st_size;
+                        }
                         break;
                     }
             }
@@ -350,6 +456,15 @@ void* get_vdso_sym(const char* vdso_func_name)
     return ret;
 }
 
+static void vdso_get_sgx_enter_enclave_range(size_t *start, size_t *end) {
+    size_t size = 0;
+    void* start_addr = get_vdso_sym("__vdso_sgx_enter_enclave", &size);
+
+    *start = (size_t)start_addr;
+    *end = *start + size;
+
+    SE_TRACE(SE_TRACE_DEBUG, "get_vdso_range = [%x, %x]\n", *start, *end);
+}
 
 static int sgx_urts_vdso_handler(long rdi, long rsi, long rdx, long ursp, long r8, long r9,
             struct sgx_enclave_run *run)
@@ -437,7 +552,7 @@ static void __attribute__((constructor)) vdso_detector(void)
 #else  
     if(vdso_sgx_enter_enclave == NULL)
     {
-        vdso_sgx_enter_enclave = (vdso_sgx_enter_enclave_t)get_vdso_sym("__vdso_sgx_enter_enclave");
+        vdso_sgx_enter_enclave = (vdso_sgx_enter_enclave_t)get_vdso_sym("__vdso_sgx_enter_enclave", NULL);
     }
 #endif
 }
@@ -471,6 +586,12 @@ int do_ecall(const int fn, const void *ocall_table, const void *ms, CTrustThread
         run.tcs = (__u64)tcs;
         run.user_handler = (__u64)sgx_urts_vdso_handler;
         run.user_data = (__u64) user_data;
+        // size_t tcs_addr = reinterpret_cast<size_t>(tcs);
+        // size_t run_addr = reinterpret_cast<size_t>(&run);
+        // // se_mutex_lock(&GLOBAL_RUN_CONTEXTS.lock);
+        // // GLOBAL_RUN_CONTEXTS.inner[tcs_addr] = run_addr;
+        // // se_mutex_unlock(&GLOBAL_RUN_CONTEXTS.lock);
+        // SE_TRACE(SE_TRACE_DEBUG, "before vdso_sgx_enter_enclave_wrapper, tcs_addr = 0x%lx, run_addr = 0x%lx\n",tcs_addr, run_addr);
         int ret = vdso_sgx_enter_enclave_wrapper((unsigned long)fn, (unsigned long)ms, (unsigned long)ocall_table, SE_EENTER,
             0, 0, &run);
         if(ret == 0)
@@ -481,6 +602,9 @@ int do_ecall(const int fn, const void *ocall_table, const void *ms, CTrustThread
         {
             status = SGX_ERROR_UNEXPECTED;
         }
+        // se_mutex_lock(&GLOBAL_RUN_CONTEXTS.lock);
+        // GLOBAL_RUN_CONTEXTS.inner.erase(tcs_addr);
+        // se_mutex_unlock(&GLOBAL_RUN_CONTEXTS.lock);
     }
     
     return status;

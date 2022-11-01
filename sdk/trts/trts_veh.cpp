@@ -601,7 +601,7 @@ extern "C" sgx_status_t trts_handle_interrupt(void *tcs)
         goto default_handler;
     }
 
-    if (is_standard_exception(ssa_gpr->REG(ip))) {
+    if (is_standard_exception(ssa_gpr->REG(ip), false)) {
         goto default_handler;
     }
 
@@ -611,7 +611,7 @@ extern "C" sgx_status_t trts_handle_interrupt(void *tcs)
 
     // The bottom 2 pages are used as stack to handle the non-standard exceptions.
     // User should take responsibility to confirm the stack is not corrupted.
-    sp = thread_data->stack_limit_addr + SE_PAGE_SIZE*2;
+    sp = thread_data->stack_limit_addr + SE_PAGE_SIZE*8;
 
     if(!is_stack_addr((void*)sp, 0))  // check stack overrun only, alignment will be checked after exception handled
     {
