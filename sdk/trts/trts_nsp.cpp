@@ -117,7 +117,7 @@ extern "C" int enter_enclave(int index, void *ms, void *tcs, int cssa)
         error = trts_handle_exception(tcs, (outside_exitinfo_t*)ms);
         if (check_static_stack_canary(tcs) != 0)
         {
-            error = SGX_ERROR_STACK_OVERRUN;
+            error = SGX_ERROR_FILE_NOT_SGX_FILE;
         }
     }
     else if((cssa == 1) && (index == ECMD_INTERRUPT))
@@ -125,7 +125,7 @@ extern "C" int enter_enclave(int index, void *ms, void *tcs, int cssa)
         error = trts_handle_interrupt(tcs);
         if (check_static_stack_canary(tcs) != 0)
         {
-            error = SGX_ERROR_STACK_OVERRUN;
+            error = SGX_ERROR_FILE_CANT_OPEN_RECOVERY_FILE;
         }
     }
     if(error == SGX_ERROR_UNEXPECTED)

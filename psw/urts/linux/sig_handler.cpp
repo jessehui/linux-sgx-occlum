@@ -184,8 +184,9 @@ void sig_handler(int signum, siginfo_t* siginfo, void *priv)
             return;
         }
         //If the exception is caused by enclave lost or internal stack overrun, then return the error code to ecall caller elegantly.
-        else if(SGX_ERROR_ENCLAVE_LOST == ret || SGX_ERROR_STACK_OVERRUN == ret)
+        else if(SGX_ERROR_ENCLAVE_LOST == ret || SGX_ERROR_STACK_OVERRUN <= ret)
         {
+            SE_TRACE(SE_TRACE_NOTICE, "error on SGX_ERROR_STACK_OVERRUN\n");
             //enter_enlcave function will return with ret which is from tRTS;
             context->uc_mcontext.gregs[REG_XIP] = reinterpret_cast<greg_t>(get_eretp());
             context->uc_mcontext.gregs[REG_XSI] = ret;

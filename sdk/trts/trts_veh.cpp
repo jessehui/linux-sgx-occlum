@@ -339,6 +339,7 @@ extern "C" sgx_status_t trts_handle_exception(void *tcs, outside_exitinfo_t *u_o
     uint32_t *pkru_ptr = NULL;
     size_t size = 0;
     bool standard_exception = true;
+    sgx_status_t test_errcd = SGX_SUCCESS;
 
     if ((thread_data == NULL) || (tcs == NULL)) goto default_handler;
     if (check_static_stack_canary(tcs) != 0)
@@ -367,12 +368,14 @@ extern "C" sgx_status_t trts_handle_exception(void *tcs, outside_exitinfo_t *u_o
     // but, for non-standard exceptions, we cannot make any assumption about how the dynamically-loaded code uses stack--- it may choose an arbitrary memory region as its stack.
     // Thus, when handling non-standard exceptions, we use a special, SDK-reserved memory region as the stack.
     standard_exception = is_standard_exception(ssa_gpr->REG(ip));
+    test_errcd = SGX_ERROR_FILE_BAD_STATUS;
 
     if (!standard_exception)
     {
-        // The bottom 2 pages are used as stack to handle the non-standard exceptions.
+        // The bottom 4 pages are used as stack to handle the non-standard exceptions.
         // User should take responsibility to confirm the stack is not corrupted.
-        sp = thread_data->stack_limit_addr + SE_PAGE_SIZE*2;
+        sp = thread_data->stack_limit_addr + SE_PAGE_SIZE*8;
+        test_errcd = SGX_ERROR_FILE_NO_KEY_ID;
     }
     else
     {
@@ -390,14 +393,15 @@ extern "C" sgx_status_t trts_handle_exception(void *tcs, outside_exitinfo_t *u_o
         if (sp_u == sp)
         {
             g_enclave_state = ENCLAVE_CRASHED;
-            return SGX_ERROR_STACK_OVERRUN;
+            return SGX_ERROR_PCL_ENCRYPTED;
         }
+        test_errcd = SGX_ERROR_FILE_NAME_MISMATCH;
     }
 
     if(!is_stack_addr((void*)sp, 0))  // check stack overrun only, alignment will be checked after exception handled
     {
         g_enclave_state = ENCLAVE_CRASHED;
-        return SGX_ERROR_STACK_OVERRUN;
+        return test_errcd;
     }
 
     size = 0;
@@ -414,7 +418,7 @@ extern "C" sgx_status_t trts_handle_exception(void *tcs, outside_exitinfo_t *u_o
     if(!is_stack_addr((void *)sp, size))
     {
         g_enclave_state = ENCLAVE_CRASHED;
-        return SGX_ERROR_STACK_OVERRUN;
+        return SGX_ERROR_PCL_MAC_MISMATCH;
     }
 
     info = (sgx_exception_info_t *)sp;
@@ -424,7 +428,7 @@ extern "C" sgx_status_t trts_handle_exception(void *tcs, outside_exitinfo_t *u_o
     if(!is_stack_addr((void *)sp, size))
     {
         g_enclave_state = ENCLAVE_CRASHED;
-        return SGX_ERROR_STACK_OVERRUN;
+        return SGX_ERROR_PCL_SHA_MISMATCH;
     }
     
     // sp is within limit_addr and commit_addr, currently only SGX 2.0 under hardware mode will enter this branch.
@@ -447,7 +451,7 @@ extern "C" sgx_status_t trts_handle_exception(void *tcs, outside_exitinfo_t *u_o
         else
         {
             g_enclave_state = ENCLAVE_CRASHED;
-            return SGX_ERROR_STACK_OVERRUN;
+            return SGX_ERROR_PCL_GUID_MISMATCH;
         }
     }
     if (size_t(&Lereport_inst) == ssa_gpr->REG(ip) && SE_EREPORT == ssa_gpr->REG(ax))
@@ -624,14 +628,14 @@ extern "C" sgx_status_t trts_handle_interrupt(void *tcs)
         return SGX_SUCCESS;
     }
 
-    // The bottom 2 pages are used as stack to handle the non-standard exceptions.
+    // The bottom 4 pages are used as stack to handle the non-standard exceptions.
     // User should take responsibility to confirm the stack is not corrupted.
-    sp = thread_data->stack_limit_addr + SE_PAGE_SIZE*2;
+    sp = thread_data->stack_limit_addr + SE_PAGE_SIZE*8;
 
     if(!is_stack_addr((void*)sp, 0))  // check stack overrun only, alignment will be checked after exception handled
     {
         g_enclave_state = ENCLAVE_CRASHED;
-        return SGX_ERROR_STACK_OVERRUN;
+        return SGX_ERROR_FILE_NO_KEY_ID;
     }
 
     size = 0;
@@ -648,7 +652,7 @@ extern "C" sgx_status_t trts_handle_interrupt(void *tcs)
     if(!is_stack_addr((void *)sp, size))
     {
         g_enclave_state = ENCLAVE_CRASHED;
-        return SGX_ERROR_STACK_OVERRUN;
+        return SGX_ERROR_FILE_BAD_STATUS;
     }
 
     info = (sgx_interrupt_info_t *)sp;
@@ -658,7 +662,7 @@ extern "C" sgx_status_t trts_handle_interrupt(void *tcs)
     if(!is_stack_addr((void *)sp, size))
     {
         g_enclave_state = ENCLAVE_CRASHED;
-        return SGX_ERROR_STACK_OVERRUN;
+        return SGX_INTERNAL_ERROR_ENCLAVE_CREATE_INTERRUPTED;
     }
 
     // restore the fs
