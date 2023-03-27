@@ -179,11 +179,13 @@ void sig_handler(int signum, siginfo_t* siginfo, void *priv)
         CEnclave *enclave = param->trust_thread->get_enclave();
         if(enclave->get_aex_notify() != true)
         {
-            unsigned int ret = enclave->ecall(ecmd, param->ocall_table, ms);
+            // unsigned int ret = enclave->ecall(ecmd, param->ocall_table, ms);
+            unsigned int ret = do_ecall(ecmd, param->ocall_table, ms, param->trust_thread);
             if(SGX_SUCCESS == ret)
             {
                 //ERESUME execute
                 return;
+
             }
             //If the exception is caused by enclave lost or internal stack overrun, then return the error code to ecall caller elegantly.
             else if(SGX_ERROR_ENCLAVE_LOST == ret || SGX_ERROR_STACK_OVERRUN == ret)
