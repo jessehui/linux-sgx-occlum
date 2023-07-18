@@ -52,7 +52,8 @@
 #include "se_cdefs.h"
 #include "emm_private.h"
 #include "sgx_mm_rt_abstraction.h"
-#include "sgx_memset_s.h"
+#include "se_memcpy.h"
+// #include "sgx_memset_s.h"
 #include "sgx_interrupt.h"
 
 typedef struct _handler_node_t
@@ -191,6 +192,7 @@ static bool is_standard_exception(uintptr_t);
 // continue_execution(sgx_exception_info_t *info):
 //      try to restore the thread context saved in info to current execution context.
 extern "C" __attribute__((regparm(1))) void continue_execution(sgx_exception_info_t *info);
+extern "C" void restore_xregs(uint8_t *buf);
 
 // internal_handle_exception(sgx_exception_info_t *info):
 //      the 2nd phrase exception handing, which traverse registered exception handlers.
@@ -219,6 +221,7 @@ extern "C" __attribute__((regparm(1))) void internal_handle_exception(sgx_except
         if(SGX_MM_EXCEPTION_CONTINUE_EXECUTION == g_mm_pfhandler(pfinfo))
         {
             //instruction triggering the exception will be executed again.
+            restore_xregs(info->xsave_area);
             continue_execution(info);
         }
         //restore old flag, and fall thru
@@ -243,6 +246,7 @@ extern "C" __attribute__((regparm(1))) void internal_handle_exception(sgx_except
         thread_data->exception_flag = -1;
 
         //instruction triggering the exception will be executed again.
+        restore_xregs(info->xsave_area);
         continue_execution(info);
     }
 
@@ -300,6 +304,7 @@ extern "C" __attribute__((regparm(1))) void internal_handle_exception(sgx_except
     }
 
     //instruction triggering the exception will be executed again.
+    restore_xregs(info->xsave_area);
     continue_execution(info);
 
 failed_end:
@@ -338,6 +343,7 @@ extern "C" sgx_status_t trts_handle_exception(void *tcs, outside_exitinfo_t *u_o
     uintptr_t first_ssa_base = 0, pkru_base = 0;
     uint32_t *pkru_ptr = NULL;
     size_t size = 0;
+    uint8_t *ssa_xsave = NULL;
     bool standard_exception = true;
 
     if ((thread_data == NULL) || (tcs == NULL)) goto default_handler;
@@ -370,9 +376,9 @@ extern "C" sgx_status_t trts_handle_exception(void *tcs, outside_exitinfo_t *u_o
 
     if (!standard_exception)
     {
-        // The bottom 2 pages are used as stack to handle the non-standard exceptions.
+        // The bottom 4 pages are used as stack to handle the non-standard exceptions.
         // User should take responsibility to confirm the stack is not corrupted.
-        sp = thread_data->stack_limit_addr + SE_PAGE_SIZE*2;
+        sp = thread_data->stack_limit_addr + SE_PAGE_SIZE*4;
     }
     else
     {
@@ -407,8 +413,9 @@ extern "C" sgx_status_t trts_handle_exception(void *tcs, outside_exitinfo_t *u_o
 
     // decrease the stack to give space for info
     size += sizeof(sgx_exception_info_t);
+    size += thread_data->xsave_size;
     sp -= size;
-    sp = sp & ~0xF;
+    sp = sp & ~0x3F;
 
     // check the decreased sp to make sure it is in the trusted stack range
     if(!is_stack_addr((void *)sp, size))
@@ -498,6 +505,9 @@ extern "C" sgx_status_t trts_handle_exception(void *tcs, outside_exitinfo_t *u_o
     // initialize the info with SSA[0]
     info->exception_vector = (sgx_exception_vector_t)ssa_gpr->exit_info.vector;
     info->exception_type = (sgx_exception_type_t)ssa_gpr->exit_info.exit_type;
+    info->xsave_size = thread_data->xsave_size;
+    ssa_xsave = (uint8_t*)ROUND_TO_PAGE(thread_data->first_ssa_gpr) - ROUND_TO_PAGE(get_xsave_size() + sizeof(ssa_gpr_t));
+    memcpy_s(info->xsave_area, info->xsave_size, ssa_xsave, info->xsave_size);
 
     info->cpu_context.REG(ax) = ssa_gpr->REG(ax);
     info->cpu_context.REG(cx) = ssa_gpr->REG(cx);
@@ -624,9 +634,9 @@ extern "C" sgx_status_t trts_handle_interrupt(void *tcs)
         return SGX_SUCCESS;
     }
 
-    // The bottom 2 pages are used as stack to handle the non-standard exceptions.
+    // The bottom 4 pages are used as stack to handle the non-standard exceptions.
     // User should take responsibility to confirm the stack is not corrupted.
-    sp = thread_data->stack_limit_addr + SE_PAGE_SIZE*2;
+    sp = thread_data->stack_limit_addr + SE_PAGE_SIZE*4;
 
     if(!is_stack_addr((void*)sp, 0))  // check stack overrun only, alignment will be checked after exception handled
     {
