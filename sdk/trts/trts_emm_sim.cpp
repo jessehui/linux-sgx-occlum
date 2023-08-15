@@ -32,6 +32,7 @@
 #include "util.h"
 #include "sgx_mm.h"
 #include "emm_private.h"
+#include <errno.h>
 
 int mm_commit(void* addr, size_t size)
 {
